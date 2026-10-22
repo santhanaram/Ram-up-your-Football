@@ -149,8 +149,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x76a9e8); // Sky blue
 scene.fog = new THREE.FogExp2(0x76a9e8, 0.007);
 
-const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 18, 28);
+const CAMERA_DISTANCE = 50;
+const CAMERA_HEIGHT = 34;
+const CAMERA_PAN_MARGIN = 12;
+const camera = new THREE.PerspectiveCamera(20, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(CAMERA_DISTANCE, CAMERA_HEIGHT, 0);
+const cameraLookAt = new THREE.Vector3(0, 0, 0);
+camera.lookAt(cameraLookAt);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -159,10 +164,10 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 // Lighting setup: Bright stadium floodlight style
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.65 * Math.PI);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xfff7e6, 0.85);
+const sunLight = new THREE.DirectionalLight(0xfff7e6, 0.85 * Math.PI);
 sunLight.position.set(40, 60, 30);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
@@ -176,7 +181,7 @@ sunLight.shadow.camera.bottom = -70;
 scene.add(sunLight);
 
 // Secondary soft fill
-const hemiLight = new THREE.HemisphereLight(0x9bd8ff, 0x1f5c22, 0.35);
+const hemiLight = new THREE.HemisphereLight(0x9bd8ff, 0x1f5c22, 0.35 * Math.PI);
 scene.add(hemiLight);
 
 function buildStadium() {
@@ -194,6 +199,7 @@ function buildStadium() {
     gCtx.fillRect(0, i * stripeH, 512, stripeH);
   }
   const grassTexture = new THREE.CanvasTexture(grassCanvas);
+  grassTexture.colorSpace = THREE.SRGBColorSpace;
   grassTexture.wrapS = THREE.RepeatWrapping;
   grassTexture.wrapT = THREE.RepeatWrapping;
   grassTexture.repeat.set(1, 1);
@@ -400,7 +406,9 @@ function createFootballTexture() {
     ctx.fill();
   });
 
-  return new THREE.CanvasTexture(bCanvas);
+  const tex = new THREE.CanvasTexture(bCanvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 const ballTexture = createFootballTexture();
@@ -469,6 +477,7 @@ function createPlayerModel(colorHex, numberStr, isGK = false) {
   numCtx.textBaseline = 'middle';
   numCtx.fillText(numberStr, 64, 64);
   const numTex = new THREE.CanvasTexture(numCanvas);
+  numTex.colorSpace = THREE.SRGBColorSpace;
   const numBadgeGeo = new THREE.PlaneGeometry(0.38, 0.38);
   const numBadgeMat = new THREE.MeshBasicMaterial({ map: numTex, transparent: true });
   const numBadge = new THREE.Mesh(numBadgeGeo, numBadgeMat);
@@ -1067,16 +1076,22 @@ function updatePlayers(delta) {
   let moveDir = new THREE.Vector3(0, 0, 0);
 
   // Combine Keyboard WASD / Arrows
-  if (input.keys['w'] || input.keys['arrowup']) moveDir.z -= 1;
-  if (input.keys['s'] || input.keys['arrowdown']) moveDir.z += 1;
-  if (input.keys['a'] || input.keys['arrowleft']) moveDir.x -= 1;
-  if (input.keys['d'] || input.keys['arrowright']) moveDir.x += 1;
+  // Input is in screen space (right / down). The side-on camera looks along -x,
+  // so screen right is world -z (towards the goal Blue attacks) and screen down is world +x.
+  let screenX = 0;
+  let screenY = 0;
+  if (input.keys['w'] || input.keys['arrowup']) screenY -= 1;
+  if (input.keys['s'] || input.keys['arrowdown']) screenY += 1;
+  if (input.keys['a'] || input.keys['arrowleft']) screenX -= 1;
+  if (input.keys['d'] || input.keys['arrowright']) screenX += 1;
 
   // Add touch virtual joystick contribution
   if (Math.abs(input.moveX) > 0.05 || Math.abs(input.moveZ) > 0.05) {
-    moveDir.x = input.moveX;
-    moveDir.z = input.moveZ;
+    screenX = input.moveX;
+    screenY = input.moveZ;
   }
+  moveDir.x = screenY;
+  moveDir.z = -screenX;
 
   if (moveDir.length() > 0.01) {
     moveDir.normalize();
@@ -1095,7 +1110,7 @@ function updatePlayers(delta) {
   const distToBall = controlled.pos.distanceTo(ballPhysics.pos);
   if (distToBall < 1.7 && ballPhysics.pos.y < 1.2 && !controlled.isJumping) {
     // Player controls the dribble
-    const forwardVec = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), controlled.model.mesh.rotation.y);
+    const forwardVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), controlled.model.mesh.rotation.y);
     const dribblePos = controlled.pos.clone().add(forwardVec.multiplyScalar(1.2));
     
     // Smoothly drag ball
@@ -1245,22 +1260,26 @@ const rCtx = radarCanvas.getContext('2d');
 function updateCamera(delta) {
   const controlled = getControlledPlayer();
 
-  // Dynamic broadcast perspective: Tracks player and ball midpoint
+  // Side-on broadcast camera: sits beyond the +x touchline and pans along the pitch,
+  // so the goals are at the left and right of a landscape screen.
   const focusPoint = new THREE.Vector3()
     .copy(controlled.pos)
     .add(ballPhysics.pos)
     .multiplyScalar(0.5);
 
+  const maxPan = FIELD_LENGTH / 2 - CAMERA_PAN_MARGIN;
+  const focusZ = THREE.MathUtils.clamp(focusPoint.z, -maxPan, maxPan);
+  const focusX = THREE.MathUtils.clamp(focusPoint.x, -FIELD_WIDTH / 2, FIELD_WIDTH / 2);
+
   const targetCamPos = new THREE.Vector3(
-    focusPoint.x * 0.35,
-    Math.max(16, 17 + ballPhysics.pos.y * 0.5),
-    focusPoint.z + 24
+    CAMERA_DISTANCE + focusX * 0.3,
+    CAMERA_HEIGHT + ballPhysics.pos.y * 0.3,
+    focusZ
   );
 
   camera.position.lerp(targetCamPos, 0.08);
-  
-  const camLookAt = new THREE.Vector3(focusPoint.x * 0.5, 2.0, focusPoint.z - 8);
-  camera.lookAt(camLookAt);
+  cameraLookAt.lerp(new THREE.Vector3(focusX * 0.6, 0, focusZ), 0.08);
+  camera.lookAt(cameraLookAt);
 }
 
 function updateRadar() {
@@ -1277,15 +1296,16 @@ function updateRadar() {
   rCtx.strokeRect(4, 4, w - 8, h - 8);
   // Center line
   rCtx.beginPath();
-  rCtx.moveTo(4, h / 2);
-  rCtx.lineTo(w - 4, h / 2);
+  rCtx.moveTo(w / 2, 4);
+  rCtx.lineTo(w / 2, h - 4);
   rCtx.stroke();
 
   // Draw Players
   players.forEach(p => {
     // Map pitch coords [-FIELD_WIDTH/2, FIELD_WIDTH/2] and [-FIELD_LENGTH/2, FIELD_LENGTH/2] to radar
-    const rx = ((p.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (w - 16) + 8;
-    const ry = ((p.pos.z + FIELD_LENGTH / 2) / FIELD_LENGTH) * (h - 16) + 8;
+    // Radar matches the side-on view: world -z is right, world +x is down
+    const rx = ((FIELD_LENGTH / 2 - p.pos.z) / FIELD_LENGTH) * (w - 16) + 8;
+    const ry = ((p.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (h - 16) + 8;
 
     rCtx.beginPath();
     rCtx.arc(rx, ry, p.team === 'home' ? 5 : 4, 0, Math.PI * 2);
@@ -1298,8 +1318,8 @@ function updateRadar() {
   });
 
   // Draw Ball on Radar
-  const bx = ((ballPhysics.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (w - 16) + 8;
-  const by = ((ballPhysics.pos.z + FIELD_LENGTH / 2) / FIELD_LENGTH) * (h - 16) + 8;
+  const bx = ((FIELD_LENGTH / 2 - ballPhysics.pos.z) / FIELD_LENGTH) * (w - 16) + 8;
+  const by = ((ballPhysics.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (h - 16) + 8;
   rCtx.beginPath();
   rCtx.arc(bx, by, 3.5, 0, Math.PI * 2);
   rCtx.fillStyle = '#ffffff';
@@ -1307,6 +1327,7 @@ function updateRadar() {
 }
 
 let lastTimestamp = performance.now();
+const portraitTouchQuery = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
 let secondCounter = 0;
 
 function updateMatchClock(delta) {
@@ -1334,7 +1355,8 @@ function gameLoop(now) {
   const delta = Math.min((now - lastTimestamp) / 1000, 0.1);
   lastTimestamp = now;
 
-  if (!gameState.isPaused) {
+  // Phones held in portrait see the rotate overlay, so freeze play until they turn back
+  if (!gameState.isPaused && !portraitTouchQuery.matches) {
     updatePlayers(delta);
     updateBall(delta);
     updateMatchClock(delta);

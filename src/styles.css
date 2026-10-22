@@ -73,6 +73,28 @@
       background: rgba(10, 30, 20, 0.7);
       backdrop-filter: blur(4px);
     }
+    /* Keep HUD clear of notches and home indicators in landscape */
+    #ui-overlay {
+      padding-left: max(0.75rem, env(safe-area-inset-left));
+      padding-right: max(0.75rem, env(safe-area-inset-right));
+      padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+    /* Rotate prompt: only on touch devices held in portrait */
+    #rotate-overlay {
+      display: none;
+    }
+    @media (orientation: portrait) and (pointer: coarse) {
+      #rotate-overlay {
+        display: flex;
+      }
+    }
+    @keyframes rotateHint {
+      0%, 20% { transform: rotate(0deg); }
+      60%, 100% { transform: rotate(-90deg); }
+    }
+    .rotate-hint {
+      animation: rotateHint 1.6s ease-in-out infinite alternate;
+    }
     /* Goal Celebration Banner */
     @keyframes goalPulse {
       0% { transform: scale(0.6); opacity: 0; }

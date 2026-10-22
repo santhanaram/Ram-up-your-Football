@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Ram up your Football</title>
+  <meta name="theme-color" content="#0b1510">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Inter:wght@400;600;800&display=swap">
@@ -33,6 +40,10 @@
     <div class="flex flex-col items-center bg-black/70 backdrop-blur-md px-4 py-1 sm:py-2 rounded-xl border border-white/10 shadow-lg">
       <span class="hud-font text-xl sm:text-3xl font-bold text-amber-400" id="match-timer">00:00</span>
       <span id="match-half" class="text-[9px] sm:text-[10px] text-gray-300 uppercase tracking-widest font-semibold">1ST HALF</span>
+      <!-- Mini Radar: same orientation as the pitch, Blue Lions attack to the right -->
+      <div id="radar-container" class="mt-1 w-24 h-[54px] rounded-md relative overflow-hidden border border-emerald-500/30">
+        <canvas id="radar-canvas" class="w-full h-full"></canvas>
+      </div>
     </div>
 
     <!-- Away Team (Enemy) -->
@@ -52,14 +63,6 @@
   <div class="flex flex-col items-center justify-center space-y-2">
     <div id="action-feed" class="text-xs sm:text-sm tracking-widest font-bold uppercase bg-neutral-900/75 border border-white/20 px-4 py-1 rounded-full opacity-0 transition-opacity duration-300 text-yellow-300">
       PASS READY
-    </div>
-    
-    <!-- Mini Radar -->
-    <div id="radar-container" class="w-32 h-20 sm:w-40 sm:h-24 rounded-lg relative overflow-hidden shadow-2xl border border-emerald-500/30">
-      <canvas id="radar-canvas" class="w-full h-full"></canvas>
-      <div class="absolute inset-0 pointer-events-none border border-white/10 flex items-center justify-center">
-        <div class="w-full h-[1px] bg-white/20"></div>
-      </div>
     </div>
   </div>
 
@@ -114,6 +117,13 @@
     </div>
 
   </div>
+</div>
+
+<!-- Shown on touch devices held in portrait; the game is landscape only -->
+<div id="rotate-overlay" class="fixed inset-0 z-50 bg-neutral-950 flex-col items-center justify-center gap-4 text-center px-8">
+  <i class="fa-solid fa-mobile-screen-button text-5xl text-emerald-400 rotate-hint"></i>
+  <div class="hud-font text-3xl tracking-wider">ROTATE YOUR PHONE</div>
+  <p class="text-sm text-gray-400">Ram up your Football plays in landscape.</p>
 </div>
 
 <div id="goal-modal" class="fixed inset-0 z-40 bg-black/75 backdrop-blur-md flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
