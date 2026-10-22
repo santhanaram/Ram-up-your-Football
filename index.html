@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ram up your Football</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Inter:wght@400;600;800&display=swap">
+</head>
+<body class="text-white">
+
+
+<canvas id="game-canvas"></canvas>
+
+<div id="ui-overlay" class="relative z-20 w-full h-full pointer-events-none flex flex-col justify-between p-3 sm:p-5">
+  
+  <!-- Top Scoreboard Bar -->
+  <div class="flex items-center justify-between w-full max-w-4xl mx-auto pointer-events-auto">
+    <!-- Home Team (You) -->
+    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-emerald-500/40 shadow-lg">
+      <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-emerald-500 flex items-center justify-center font-bold text-sm sm:text-base text-neutral-950 border border-white/50">
+        FC
+      </div>
+      <div class="text-left">
+        <div class="text-xs sm:text-sm font-bold tracking-wider text-emerald-400">BLUE LIONS</div>
+        <div class="text-[10px] text-gray-400 uppercase font-semibold">ATTACK</div>
+      </div>
+      <div id="score-home" class="hud-font text-2xl sm:text-4xl font-bold ml-2 text-white">0</div>
+    </div>
+
+    <!-- Match Clock & Status -->
+    <div class="flex flex-col items-center bg-black/70 backdrop-blur-md px-4 py-1 sm:py-2 rounded-xl border border-white/10 shadow-lg">
+      <span class="hud-font text-xl sm:text-3xl font-bold text-amber-400" id="match-timer">00:00</span>
+      <span id="match-half" class="text-[9px] sm:text-[10px] text-gray-300 uppercase tracking-widest font-semibold">1ST HALF</span>
+    </div>
+
+    <!-- Away Team (Enemy) -->
+    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-red-500/40 shadow-lg">
+      <div id="score-away" class="hud-font text-2xl sm:text-4xl font-bold mr-2 text-white">0</div>
+      <div class="text-right">
+        <div class="text-xs sm:text-sm font-bold tracking-wider text-red-400">RED EAGLES</div>
+        <div class="text-[10px] text-gray-400 uppercase font-semibold">DEFENSE</div>
+      </div>
+      <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-red-600 flex items-center justify-center font-bold text-sm sm:text-base text-white border border-white/50">
+        RE
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Banner / Combo Feed -->
+  <div class="flex flex-col items-center justify-center space-y-2">
+    <div id="action-feed" class="text-xs sm:text-sm tracking-widest font-bold uppercase bg-neutral-900/75 border border-white/20 px-4 py-1 rounded-full opacity-0 transition-opacity duration-300 text-yellow-300">
+      PASS READY
+    </div>
+    
+    <!-- Mini Radar -->
+    <div id="radar-container" class="w-32 h-20 sm:w-40 sm:h-24 rounded-lg relative overflow-hidden shadow-2xl border border-emerald-500/30">
+      <canvas id="radar-canvas" class="w-full h-full"></canvas>
+      <div class="absolute inset-0 pointer-events-none border border-white/10 flex items-center justify-center">
+        <div class="w-full h-[1px] bg-white/20"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Interactive Zone & Controls UI -->
+  <div class="w-full flex items-end justify-between pointer-events-none pb-2 sm:pb-3">
+    
+    <!-- Mobile Virtual Joystick placeholder area (active on touch) -->
+    <div class="w-36 h-36 relative pointer-events-auto">
+      <div id="joystick-zone" class="joystick-base">
+        <div id="joystick-thumb" class="joystick-thumb"></div>
+      </div>
+    </div>
+
+    <!-- Desktop Key Bindings Help Tooltip (Hidden on small mobile) -->
+    <div class="hidden lg:flex items-center gap-4 bg-black/60 backdrop-blur-md border border-white/15 px-4 py-2.5 rounded-2xl text-[11px] text-gray-300 pointer-events-auto">
+      <div><span class="px-2 py-1 bg-white/20 rounded font-mono text-white mr-1">WASD / Arrows</span> Move</div>
+      <div><span class="px-2 py-1 bg-blue-600 text-white rounded font-mono font-bold mr-1">J</span> Pass (Ground)</div>
+      <div><span class="px-2 py-1 bg-amber-500 text-white rounded font-mono font-bold mr-1">K</span> High Cross</div>
+      <div><span class="px-2 py-1 bg-red-600 text-white rounded font-mono font-bold mr-1">L</span> Shoot / Volley</div>
+      <div><span class="px-2 py-1 bg-purple-600 text-white rounded font-mono font-bold mr-1">SPACE</span> Jump / Head</div>
+    </div>
+
+    <!-- Action Buttons (Touch Friendly & Clickable) -->
+    <div class="grid grid-cols-2 gap-2.5 sm:gap-3 pointer-events-auto">
+      <!-- Ground Pass Button -->
+      <button id="btn-pass" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 border border-blue-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
+        <i class="fa-solid fa-arrows-turn-to-dots text-base sm:text-lg mb-0.5"></i>
+        <span>PASS</span>
+        <span class="text-[9px] opacity-75 hidden sm:inline">(J)</span>
+      </button>
+
+      <!-- High Cross Button -->
+      <button id="btn-cross" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-amber-600 to-yellow-400 border border-amber-300/40 text-neutral-950 font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
+        <i class="fa-solid fa-arrow-up-right-dots text-base sm:text-lg mb-0.5"></i>
+        <span>CROSS</span>
+        <span class="text-[9px] opacity-75 hidden sm:inline">(K)</span>
+      </button>
+
+      <!-- Jump Header Button -->
+      <button id="btn-header" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-purple-700 to-indigo-500 border border-purple-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
+        <i class="fa-solid fa-child-reaching text-base sm:text-lg mb-0.5"></i>
+        <span>HEAD</span>
+        <span class="text-[9px] opacity-75 hidden sm:inline">(SPC)</span>
+      </button>
+
+      <!-- Power Shoot Button -->
+      <button id="btn-shoot" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-red-600 to-rose-400 border border-red-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
+        <i class="fa-solid fa-bolt text-base sm:text-lg mb-0.5"></i>
+        <span>SHOOT</span>
+        <span class="text-[9px] opacity-75 hidden sm:inline">(L)</span>
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<div id="goal-modal" class="fixed inset-0 z-40 bg-black/75 backdrop-blur-md flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+  <div class="text-center p-6 sm:p-10 bg-gradient-to-b from-neutral-900 to-neutral-950 rounded-3xl border-2 border-amber-400 max-w-sm sm:max-w-md w-11/12 shadow-2xl relative">
+    <div class="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 rounded-full bg-amber-400 flex items-center justify-center text-4xl shadow-lg border-4 border-neutral-900">
+      ⚽
+    </div>
+    <h1 class="hud-font text-5xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 mt-4 tracking-wider">
+      GOOOAL!
+    </h1>
+    <p id="goal-detail" class="text-sm sm:text-base text-gray-200 mt-2 font-medium">Sensational Strike!</p>
+    <div class="mt-6 flex flex-col gap-2">
+      <button id="btn-resume-match" class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold rounded-xl transition text-base tracking-wider uppercase shadow-lg">
+        Continue Attack
+      </button>
+      <button id="btn-restart-match" class="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-semibold rounded-xl text-sm transition">
+        Reset Match
+      </button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
