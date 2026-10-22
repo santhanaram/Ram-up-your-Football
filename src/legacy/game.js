@@ -140,6 +140,11 @@ const gameState = {
   matchSeconds: 0,
   isPaused: false,
   controlledPlayerIndex: 0,
+  dribbleLock: 0, // seconds before the ball may stick to a player's foot again
+  receiveAssist: 0, // seconds the pass receiver auto-runs to the ball
+  tackleCooldown: 0, // seconds before the Red Eagles may tackle again
+  switchCooldown: 0, // seconds before auto-switch may change player again
+  lastMoveDir: new THREE.Vector3(0, 0, 0), // world-space direction of the last stick/key input
   lastShooter: null,
   isHeaderActive: false
 };
@@ -149,8 +154,19 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x76a9e8); // Sky blue
 scene.fog = new THREE.FogExp2(0x76a9e8, 0.007);
 
-const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 18, 28);
+const CAMERA_DISTANCE = 50;
+const CAMERA_HEIGHT = 34;
+const CAMERA_PAN_MARGIN = 12;
+// Keep the same width of pitch in view on any screen shape (phone, tablet, desktop)
+const CAMERA_HORIZONTAL_FOV = 42;
+function verticalFovFor(aspect) {
+  const halfH = THREE.MathUtils.degToRad(CAMERA_HORIZONTAL_FOV / 2);
+  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(halfH) / aspect));
+}
+const camera = new THREE.PerspectiveCamera(verticalFovFor(window.innerWidth / window.innerHeight), window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(CAMERA_DISTANCE, CAMERA_HEIGHT, 0);
+const cameraLookAt = new THREE.Vector3(0, 0, 0);
+camera.lookAt(cameraLookAt);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -159,10 +175,10 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 // Lighting setup: Bright stadium floodlight style
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.65 * Math.PI);
 scene.add(ambientLight);
 
-const sunLight = new THREE.DirectionalLight(0xfff7e6, 0.85);
+const sunLight = new THREE.DirectionalLight(0xfff7e6, 0.85 * Math.PI);
 sunLight.position.set(40, 60, 30);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
@@ -176,7 +192,7 @@ sunLight.shadow.camera.bottom = -70;
 scene.add(sunLight);
 
 // Secondary soft fill
-const hemiLight = new THREE.HemisphereLight(0x9bd8ff, 0x1f5c22, 0.35);
+const hemiLight = new THREE.HemisphereLight(0x9bd8ff, 0x1f5c22, 0.35 * Math.PI);
 scene.add(hemiLight);
 
 function buildStadium() {
@@ -194,6 +210,7 @@ function buildStadium() {
     gCtx.fillRect(0, i * stripeH, 512, stripeH);
   }
   const grassTexture = new THREE.CanvasTexture(grassCanvas);
+  grassTexture.colorSpace = THREE.SRGBColorSpace;
   grassTexture.wrapS = THREE.RepeatWrapping;
   grassTexture.wrapT = THREE.RepeatWrapping;
   grassTexture.repeat.set(1, 1);
@@ -400,7 +417,9 @@ function createFootballTexture() {
     ctx.fill();
   });
 
-  return new THREE.CanvasTexture(bCanvas);
+  const tex = new THREE.CanvasTexture(bCanvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 const ballTexture = createFootballTexture();
@@ -469,6 +488,7 @@ function createPlayerModel(colorHex, numberStr, isGK = false) {
   numCtx.textBaseline = 'middle';
   numCtx.fillText(numberStr, 64, 64);
   const numTex = new THREE.CanvasTexture(numCanvas);
+  numTex.colorSpace = THREE.SRGBColorSpace;
   const numBadgeGeo = new THREE.PlaneGeometry(0.38, 0.38);
   const numBadgeMat = new THREE.MeshBasicMaterial({ map: numTex, transparent: true });
   const numBadge = new THREE.Mesh(numBadgeGeo, numBadgeMat);
@@ -582,32 +602,46 @@ const RED_COLOR = 0xdc2626;  // Opponent Red
 
 const players = [];
 
-// Blue Team (Attacking towards negative Z: Opponent's goal at z = -55)
+// Blue Lions, 4-3-3, attacking towards negative Z (opponent's goal at z = -55).
+// Home ids must equal their index in `players` (getControlledPlayer indexes by id).
 const homeRoster = [
-  { id: 0, num: '10', name: 'Striker', role: 'ST', x: 0, z: 12, isUser: true },
-  { id: 1, num: '7',  name: 'Left Winger', role: 'LW', x: -18, z: 2, isUser: false },
-  { id: 2, num: '11', name: 'Right Winger', role: 'RW', x: 18, z: 2, isUser: false },
-  { id: 3, num: '8',  name: 'Playmaker', role: 'CM', x: -2, z: 24, isUser: false }
+  { id: 0,  num: '10', name: 'Striker', role: 'ST', x: 0, z: 12, isUser: true },
+  { id: 1,  num: '7',  name: 'Left Winger', role: 'LW', x: -18, z: 2 },
+  { id: 2,  num: '11', name: 'Right Winger', role: 'RW', x: 18, z: 2 },
+  { id: 3,  num: '8',  name: 'Playmaker', role: 'CM', x: 0, z: 20 },
+  { id: 4,  num: '6',  name: 'Left Midfielder', role: 'LM', x: -13, z: 22 },
+  { id: 5,  num: '14', name: 'Right Midfielder', role: 'RM', x: 13, z: 22 },
+  { id: 6,  num: '3',  name: 'Left Back', role: 'LB', x: -22, z: 34 },
+  { id: 7,  num: '4',  name: 'Centre Back', role: 'CB', x: -7, z: 37 },
+  { id: 8,  num: '5',  name: 'Centre Back', role: 'CB', x: 7, z: 37 },
+  { id: 9,  num: '2',  name: 'Right Back', role: 'RB', x: 22, z: 34 },
+  { id: 10, num: '1',  name: 'Keeper', role: 'GK', x: 0, z: 52.2, isGK: true }
 ];
 
-// Red Team (Defenders & Goalkeeper protecting z = -55)
+// Red Eagles, 4-4-2, defending the goal at z = -55
 const awayRoster = [
-  { id: 10, num: '1',  name: 'Keeper', role: 'GK', x: 0, z: -52, isGK: true },
-  { id: 11, num: '4',  name: 'Centerback', role: 'CB', x: -7, z: -38 },
-  { id: 12, num: '5',  name: 'Centerback', role: 'CB', x: 7, z: -38 },
-  { id: 13, num: '2',  name: 'Right Back', role: 'RB', x: 19, z: -32 },
-  { id: 14, num: '3',  name: 'Left Back', role: 'LB', x: -19, z: -32 }
+  { id: 20, num: '1',  name: 'Keeper', role: 'GK', x: 0, z: -52.2, isGK: true },
+  { id: 21, num: '4',  name: 'Centre Back', role: 'CB', x: -7, z: -38 },
+  { id: 22, num: '5',  name: 'Centre Back', role: 'CB', x: 7, z: -38 },
+  { id: 23, num: '2',  name: 'Right Back', role: 'RB', x: 21, z: -34 },
+  { id: 24, num: '3',  name: 'Left Back', role: 'LB', x: -21, z: -34 },
+  { id: 25, num: '6',  name: 'Midfielder', role: 'CM', x: -7, z: -24 },
+  { id: 26, num: '8',  name: 'Midfielder', role: 'CM', x: 7, z: -24 },
+  { id: 27, num: '7',  name: 'Right Midfielder', role: 'RM', x: 20, z: -22 },
+  { id: 28, num: '11', name: 'Left Midfielder', role: 'LM', x: -20, z: -22 },
+  { id: 29, num: '9',  name: 'Forward', role: 'ST', x: -6, z: -10 },
+  { id: 30, num: '10', name: 'Forward', role: 'ST', x: 6, z: -10 }
 ];
 
 homeRoster.forEach((data, idx) => {
-  const model = createPlayerModel(BLUE_COLOR, data.num);
+  const model = createPlayerModel(BLUE_COLOR, data.num, !!data.isGK);
   players.push({
     ...data,
     team: 'home',
     model: model,
     pos: new THREE.Vector3(data.x, 0, data.z),
     vel: new THREE.Vector3(0, 0, 0),
-    speed: 13.5,
+    speed: data.isGK ? 9.0 : 13.5,
     isJumping: false,
     jumpY: 0,
     jumpVel: 0,
@@ -651,53 +685,121 @@ function showFeed(text, color = 'text-yellow-300') {
 }
 
 // 1. GROUND PASS LOGIC (J)
+const TACKLE_COOLDOWN = 1.2;
+// Per-frame (at 60 fps) speed retained by the ball on the ground and in the air
+const GROUND_FRICTION = 0.982;
+const AIR_DRAG = 0.994;
+// Ground speed needed for a pass to roll `dist` metres and still arrive with pace
+function passSpeedFor(dist) {
+  return dist * (1 - GROUND_FRICTION) * 60 + 5;
+}
+const KEEPER_LATERAL_SPEED = 3.6; // m/s across the goal mouth
+const KEEPER_REACH = 1.7; // metres either side on a dive
+// After a kick the ball can't stick to a foot straight away, or it would be re-trapped next frame
+const KICK_GRACE = 0.3;
+// After a pass the receiver runs onto the ball by himself unless you steer him
+const RECEIVE_ASSIST_TIME = 1.6;
+
+// Possession radius for one-tap pass and shoot
+const ON_BALL_RADIUS = 3.0;
+
+function hasBall(player) {
+  return player.pos.distanceTo(ballPhysics.pos) <= ON_BALL_RADIUS && ballPhysics.pos.y < 1.8;
+}
+
+// Nearest outfield Blue Lion to the ball; keepers are never auto-selected
+function nearestHomeToBall() {
+  let best = null;
+  let bestDist = Infinity;
+  players.forEach(p => {
+    if (p.team !== 'home' || p.isGK) return;
+    const d = p.pos.distanceTo(ballPhysics.pos);
+    if (d < bestDist) { bestDist = d; best = p; }
+  });
+  return best;
+}
+
+// Without the ball, PASS and SHOOT switch to the teammate closest to it instead
+function switchToNearest() {
+  const nearest = nearestHomeToBall();
+  if (nearest && nearest.id !== gameState.controlledPlayerIndex) {
+    gameState.controlledPlayerIndex = nearest.id;
+    gameState.switchCooldown = 0.4;
+    showFeed(`SWITCHED TO ${nearest.name}`, "text-emerald-300");
+  } else {
+    showFeed("GET TO THE BALL", "text-neutral-400");
+  }
+}
+
+// True when an opponent stands within `width` metres of the straight path from a to b
+function laneBlocked(a, b, width) {
+  const ab = new THREE.Vector3().subVectors(b, a); ab.y = 0;
+  const len2 = ab.lengthSq();
+  return players.some(p => {
+    if (p.team !== 'away') return false;
+    const ap = new THREE.Vector3().subVectors(p.pos, a); ap.y = 0;
+    const t = THREE.MathUtils.clamp(ap.dot(ab) / len2, 0, 1);
+    const closest = a.clone().addScaledVector(ab, t);
+    closest.y = 0;
+    return Math.hypot(p.pos.x - closest.x, p.pos.z - closest.z) < width;
+  });
+}
+
+// 1. ONE-TAP SMART PASS (J): picks the best open teammate, favouring the direction you're pushing
 function triggerPass() {
   const player = getControlledPlayer();
-  const distToBall = player.pos.distanceTo(ballPhysics.pos);
-  if (distToBall > 3.0 && ballPhysics.pos.y > 1.8) {
-    showFeed("TOO FAR FROM BALL", "text-neutral-400");
+  if (!hasBall(player)) {
+    switchToNearest();
     return;
   }
 
-  sounds.playPass();
+  // Preferred direction: current stick/keys, otherwise towards the opponent's goal
+  const preferDir = gameState.lastMoveDir.lengthSq() > 0.01
+    ? gameState.lastMoveDir.clone().normalize()
+    : new THREE.Vector3(0, 0, -1);
 
-  // Find best open teammate ahead
   let bestMate = null;
-  let minScore = Infinity;
-
+  let bestScore = Infinity;
   players.forEach((other) => {
-    if (other.team === 'home' && other.id !== player.id) {
-      // Score based on distance & forward attacking position
-      const d = player.pos.distanceTo(other.pos);
-      const forwardBonus = (other.pos.z < player.pos.z) ? -15 : 10;
-      const passScore = d + forwardBonus;
-      if (passScore < minScore) {
-        minScore = passScore;
-        bestMate = other;
-      }
-    }
+    if (other.team !== 'home' || other.id === player.id || other.isGK) return;
+    const toMate = new THREE.Vector3().subVectors(other.pos, ballPhysics.pos);
+    toMate.y = 0;
+    const d = toMate.length();
+    if (d < 4) return;
+    const alignment = toMate.clone().normalize().dot(preferDir); // -1..1
+    let score = d * 0.45 - alignment * 22;
+    if (d > 40) score += (d - 40) * 1.5; // long balls are less reliable
+    if (laneBlocked(ballPhysics.pos, other.pos, 2.0)) score += 30;
+    if (score < bestScore) { bestScore = score; bestMate = other; }
   });
 
+  sounds.playPass();
+  ballPhysics.carrier = null;
+  gameState.dribbleLock = KICK_GRACE;
+  gameState.lastShooter = player;
+
   if (bestMate) {
-    const passDir = new THREE.Vector3().subVectors(bestMate.pos, ballPhysics.pos);
+    // Lead the receiver slightly towards goal so they collect it in stride
+    const target = bestMate.pos.clone().add(new THREE.Vector3(0, 0, -1.5));
+    const passDir = new THREE.Vector3().subVectors(target, ballPhysics.pos);
     passDir.y = 0;
     const dist = passDir.length();
     passDir.normalize();
 
-    // Give the pass realistic speed to meet the teammate
-    const speed = Math.min(Math.max(dist * 1.6, 18), 28);
+    // Ground pass with enough pace to arrive despite rolling friction
+    const speed = THREE.MathUtils.clamp(passSpeedFor(dist), 12, 36);
     ballPhysics.vel.copy(passDir.multiplyScalar(speed));
     ballPhysics.vel.y = 0.5; // Stays close to turf
-    ballPhysics.carrier = null;
-    gameState.lastShooter = player;
 
-    // Switch player control to the receiver
+    // Control follows the ball to the receiver
     gameState.controlledPlayerIndex = bestMate.id;
-    showFeed(`ACCURATE PASS TO ${bestMate.name}`);
+    gameState.receiveAssist = RECEIVE_ASSIST_TIME;
+    gameState.switchCooldown = 0.8;
+    showFeed(`PASS TO ${bestMate.name}`);
   } else {
-    // Default pass forward
-    ballPhysics.vel.set(0, 0.4, -22);
-    showFeed("FORWARD PASS");
+    ballPhysics.vel.copy(preferDir.multiplyScalar(20));
+    ballPhysics.vel.y = 0.4;
+    showFeed("PASS INTO SPACE");
   }
 }
 
@@ -731,6 +833,7 @@ function triggerCross() {
   ballPhysics.vel.z = crossVector.z * 19;
   ballPhysics.vel.y = Math.min(13.5, 9.5 + distance * 0.16);
   ballPhysics.carrier = null;
+  gameState.dribbleLock = KICK_GRACE;
   gameState.lastShooter = player;
 
   ballPhysics.rot.set(0.6, 0.2, 0);
@@ -780,6 +883,7 @@ function triggerHeader() {
     ballPhysics.vel.copy(headerDir.multiplyScalar(26));
     ballPhysics.vel.y = -2.0;
     ballPhysics.carrier = null;
+    gameState.dribbleLock = KICK_GRACE;
     gameState.lastShooter = player;
 
     showFeed("POWERFUL DIVING HEADER!", "text-purple-300");
@@ -788,33 +892,51 @@ function triggerHeader() {
   }
 }
 
-// 4. POWER DRIVEN SHOT / VOLLEY LOGIC (L)
+// 4. ONE-TAP AUTO-AIMED SHOT / VOLLEY (L): aims for the corner away from the keeper
 function triggerShoot() {
   const player = getControlledPlayer();
   const distToBall = player.pos.distanceTo(ballPhysics.pos);
   if (distToBall > 3.4) {
-    showFeed("GET CLOSER TO STRIKE", "text-neutral-400");
+    switchToNearest();
     return;
   }
 
   sounds.playKick(160, 0.25);
 
-  const aimCornerX = player.pos.x > 0 ? -4.2 : 4.2;
-  const shotTarget = new THREE.Vector3(aimCornerX + (Math.random() - 0.5) * 1.5, 1.8 + Math.random() * 1.6, -55);
-  const shotDir = new THREE.Vector3().subVectors(shotTarget, ballPhysics.pos).normalize();
-  
-  const isVolley = ballPhysics.pos.y > 0.8;
-  const shotSpeed = isVolley ? 36.0 : 33.0;
+  const goalZ = -FIELD_LENGTH / 2;
+  const keeper = players.find(p => p.team === 'away' && p.isGK);
+  // Far post from the keeper; if he's central, the side away from the shooter
+  const keeperX = keeper ? keeper.pos.x : 0;
+  const side = Math.abs(keeperX) > 0.6 ? -Math.sign(keeperX) : (player.pos.x > 0 ? -1 : 1);
+  const distToGoal = Math.hypot(ballPhysics.pos.x, ballPhysics.pos.z - goalZ);
+  const spread = THREE.MathUtils.clamp(distToGoal / 30, 0.2, 1.6); // accuracy drops with range
+  const shotTarget = new THREE.Vector3(
+    side * (GOAL_WIDTH / 2 - 0.7) + (Math.random() - 0.5) * spread,
+    1.0 + Math.random() * 1.6,
+    goalZ
+  );
+  const flat = new THREE.Vector3(shotTarget.x - ballPhysics.pos.x, 0, shotTarget.z - ballPhysics.pos.z);
+  const flatDist = flat.length();
+  flat.normalize();
 
-  ballPhysics.vel.copy(shotDir.multiplyScalar(shotSpeed));
-  ballPhysics.vel.y = Math.max(shotDir.y * shotSpeed, 3.2);
+  const isVolley = ballPhysics.pos.y > 0.8;
+  const shotSpeed = THREE.MathUtils.clamp(24 + distToGoal * 0.35, 26, isVolley ? 38 : 35);
+
+  // Ballistic lift so the ball arrives at the target height (allowing ~15% for air drag)
+  const flightTime = (flatDist / shotSpeed) * 1.15;
+  ballPhysics.vel.set(flat.x * shotSpeed, 0, flat.z * shotSpeed);
+  ballPhysics.vel.y = (shotTarget.y - ballPhysics.pos.y - 0.5 * GRAVITY * flightTime * flightTime) / flightTime;
   ballPhysics.carrier = null;
+  gameState.dribbleLock = KICK_GRACE;
   gameState.lastShooter = player;
+  gameState.switchCooldown = 0.6;
 
   if (isVolley) {
     showFeed("ROCKET THUNDER VOLLEY!", "text-rose-400");
-  } else {
+  } else if (distToGoal > 25) {
     showFeed("FEROCIOUS LONG-RANGE SHOT!", "text-rose-400");
+  } else {
+    showFeed("CLINICAL FINISH!", "text-rose-400");
   }
 }
 
@@ -941,13 +1063,15 @@ function updateBall(delta) {
       ballPhysics.vel.y = 0;
     }
 
-    // Ground rolling resistance
-    ballPhysics.vel.x *= 0.965;
-    ballPhysics.vel.z *= 0.965;
+    // Ground rolling resistance (frame-rate independent)
+    const roll = Math.pow(GROUND_FRICTION, delta * 60);
+    ballPhysics.vel.x *= roll;
+    ballPhysics.vel.z *= roll;
   } else {
     // Air resistance
-    ballPhysics.vel.x *= 0.994;
-    ballPhysics.vel.z *= 0.994;
+    const drag = Math.pow(AIR_DRAG, delta * 60);
+    ballPhysics.vel.x *= drag;
+    ballPhysics.vel.z *= drag;
   }
 
   // Pitch boundary walls bounce
@@ -1061,22 +1185,50 @@ function resetBallAndTeamPosition(hardReset = false) {
 }
 
 function updatePlayers(delta) {
+  // Auto-switch: when the ball is loose, hand control to the Blue Lion closest to it
+  gameState.switchCooldown = Math.max(0, gameState.switchCooldown - delta);
+  if (gameState.switchCooldown === 0) {
+    const current = getControlledPlayer();
+    const nearest = nearestHomeToBall();
+    if (nearest && nearest.id !== current.id && !hasBall(current) &&
+        nearest.pos.distanceTo(ballPhysics.pos) + 3 < current.pos.distanceTo(ballPhysics.pos)) {
+      gameState.controlledPlayerIndex = nearest.id;
+      gameState.switchCooldown = 0.5;
+    }
+  }
+
   const controlled = getControlledPlayer();
 
   // 1. Process User Movement on Active Striker
   let moveDir = new THREE.Vector3(0, 0, 0);
 
   // Combine Keyboard WASD / Arrows
-  if (input.keys['w'] || input.keys['arrowup']) moveDir.z -= 1;
-  if (input.keys['s'] || input.keys['arrowdown']) moveDir.z += 1;
-  if (input.keys['a'] || input.keys['arrowleft']) moveDir.x -= 1;
-  if (input.keys['d'] || input.keys['arrowright']) moveDir.x += 1;
+  // Input is in screen space (right / down). The side-on camera looks along -x,
+  // so screen right is world -z (towards the goal Blue attacks) and screen down is world +x.
+  let screenX = 0;
+  let screenY = 0;
+  if (input.keys['w'] || input.keys['arrowup']) screenY -= 1;
+  if (input.keys['s'] || input.keys['arrowdown']) screenY += 1;
+  if (input.keys['a'] || input.keys['arrowleft']) screenX -= 1;
+  if (input.keys['d'] || input.keys['arrowright']) screenX += 1;
 
   // Add touch virtual joystick contribution
   if (Math.abs(input.moveX) > 0.05 || Math.abs(input.moveZ) > 0.05) {
-    moveDir.x = input.moveX;
-    moveDir.z = input.moveZ;
+    screenX = input.moveX;
+    screenY = input.moveZ;
   }
+  moveDir.x = screenY;
+  moveDir.z = -screenX;
+  gameState.lastMoveDir.copy(moveDir);
+
+  gameState.dribbleLock = Math.max(0, gameState.dribbleLock - delta);
+  gameState.receiveAssist = Math.max(0, gameState.receiveAssist - delta);
+  // Receiving a pass with no input: run onto the ball automatically
+  if (moveDir.lengthSq() < 0.0001 && gameState.receiveAssist > 0 && !hasBall(controlled)) {
+    moveDir.subVectors(ballPhysics.pos, controlled.pos);
+    moveDir.y = 0;
+  }
+  if (hasBall(controlled)) gameState.receiveAssist = 0;
 
   if (moveDir.length() > 0.01) {
     moveDir.normalize();
@@ -1093,9 +1245,9 @@ function updatePlayers(delta) {
 
   // 2. Dribble Attachment: Keep ball with controlled player when close
   const distToBall = controlled.pos.distanceTo(ballPhysics.pos);
-  if (distToBall < 1.7 && ballPhysics.pos.y < 1.2 && !controlled.isJumping) {
+  if (distToBall < 1.7 && ballPhysics.pos.y < 1.2 && !controlled.isJumping && gameState.dribbleLock === 0) {
     // Player controls the dribble
-    const forwardVec = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), controlled.model.mesh.rotation.y);
+    const forwardVec = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), controlled.model.mesh.rotation.y);
     const dribblePos = controlled.pos.clone().add(forwardVec.multiplyScalar(1.2));
     
     // Smoothly drag ball
@@ -1104,85 +1256,120 @@ function updatePlayers(delta) {
     ballPhysics.vel.set(0, 0, 0);
   }
 
-  // 3. Process AI Teammates (Blue)
-  players.forEach(p => {
-    if (p.team === 'home' && p.id !== controlled.id) {
-      // Dynamic Attacking Runs towards opposing penalty box
-      let targetZ = -30;
-      let targetX = p.x;
+  // Team shape shifts with the ball: up/down the pitch and across it
+  const shiftZ = ballPhysics.pos.z * 0.45;
+  const shiftX = ballPhysics.pos.x * 0.25;
+  const maxX = FIELD_WIDTH / 2 - 2;
+  const maxZ = FIELD_LENGTH / 2 - 3;
 
-      // Wingers spread wide and make diagonal inward runs
-      if (p.role === 'LW') {
-        targetX = -18 + (controlled.pos.z < 0 ? 6 : 0);
-        targetZ = Math.min(controlled.pos.z - 8, -26);
-      } else if (p.role === 'RW') {
-        targetX = 18 - (controlled.pos.z < 0 ? 6 : 0);
-        targetZ = Math.min(controlled.pos.z - 8, -26);
-      } else if (p.role === 'CM') {
-        targetX = controlled.pos.x * 0.5;
-        targetZ = controlled.pos.z + 10; // Supports from behind
-      }
+  const moveTowards = (p, tx, tz, rate) => {
+    tx = THREE.MathUtils.clamp(tx, -maxX, maxX);
+    tz = THREE.MathUtils.clamp(tz, -maxZ, maxZ);
+    const stepX = THREE.MathUtils.clamp((tx - p.pos.x) * rate * delta, -p.speed * delta, p.speed * delta);
+    const stepZ = THREE.MathUtils.clamp((tz - p.pos.z) * rate * delta, -p.speed * delta, p.speed * delta);
+    p.pos.x += stepX;
+    p.pos.z += stepZ;
+    return Math.hypot(stepX, stepZ);
+  };
 
-      // Move smoothly toward tactical attacking target
-      const stepX = (targetX - p.pos.x) * 2.2 * delta;
-      const stepZ = (targetZ - p.pos.z) * 2.2 * delta;
-      p.pos.x += stepX;
-      p.pos.z += stepZ;
-
-      // Face ball
-      p.model.mesh.lookAt(ballPhysics.pos.x, p.pos.y, ballPhysics.pos.z);
-      p.animSpeed = Math.hypot(stepX, stepZ) > 0.01 ? 0.7 : 0;
+  // Keepers: track the ball across the goal mouth and parry anything close
+  const updateKeeper = (p, lineZ, clearDir) => {
+    // Read a shot: if the ball is flying at goal, move towards where it will cross the line
+    let targetGKX = THREE.MathUtils.clamp(ballPhysics.pos.x * 0.65, -GOAL_WIDTH / 2.3, GOAL_WIDTH / 2.3);
+    const towardsGoal = -clearDir * ballPhysics.vel.z;
+    if (towardsGoal > 15) {
+      const timeToLine = Math.abs(lineZ - ballPhysics.pos.z) / towardsGoal;
+      targetGKX = THREE.MathUtils.clamp(ballPhysics.pos.x + ballPhysics.vel.x * timeToLine, -GOAL_WIDTH / 2, GOAL_WIDTH / 2);
     }
+    const maxStep = KEEPER_LATERAL_SPEED * delta;
+    p.pos.x += THREE.MathUtils.clamp((targetGKX - p.pos.x) * 4.5 * delta, -maxStep, maxStep);
+    p.pos.z = lineZ;
+
+    // Slow balls near the keeper are gathered; fast shots are saved only within his diving reach
+    const inBox = clearDir > 0 ? ballPhysics.pos.z < lineZ + 6 : ballPhysics.pos.z > lineZ - 6;
+    const ballSpeed = Math.hypot(ballPhysics.vel.x, ballPhysics.vel.z);
+    const gathers = ballSpeed < 12 && inBox && p.pos.distanceTo(ballPhysics.pos) < 2.5;
+    const dives = ballSpeed >= 12 && Math.abs(ballPhysics.pos.z - lineZ) < 1.2 &&
+      Math.abs(ballPhysics.pos.x - p.pos.x) < KEEPER_REACH && ballPhysics.pos.y < 2.7;
+    if (gathers || dives) {
+      ballPhysics.vel.x = (Math.random() - 0.5) * 18;
+      ballPhysics.vel.z = 22 * clearDir; // Punch clear upfield
+      ballPhysics.vel.y = 7;
+      sounds.playKick(190, 0.2);
+      showFeed(p.team === 'away' ? "KEEPER MAKES A SAVING DIVE!" : "GREAT SAVE BY OUR KEEPER!", p.team === 'away' ? "text-red-400" : "text-emerald-300");
+    }
+    p.model.mesh.rotation.y = clearDir > 0 ? 0 : Math.PI; // Face the pitch
+    p.animSpeed = Math.abs(targetGKX - p.pos.x) > 0.1 ? 0.8 : 0;
+  };
+
+  // 3. AI Teammates (Blue): forwards make runs, the rest keep a shifting 4-3 shape
+  players.forEach(p => {
+    if (p.team !== 'home' || p.id === controlled.id) return;
+    if (p.isGK) {
+      updateKeeper(p, FIELD_LENGTH / 2 - 2.8, -1);
+      return;
+    }
+
+    let targetX = p.x + shiftX;
+    let targetZ = p.z + shiftZ;
+    if (p.role === 'LW') {
+      targetX = -18 + (controlled.pos.z < 0 ? 6 : 0);
+      targetZ = Math.min(controlled.pos.z - 8, -26);
+    } else if (p.role === 'RW') {
+      targetX = 18 - (controlled.pos.z < 0 ? 6 : 0);
+      targetZ = Math.min(controlled.pos.z - 8, -26);
+    } else if (p.role === 'ST') {
+      targetX = controlled.pos.x * 0.3;
+      targetZ = Math.min(controlled.pos.z - 10, -30);
+    } else if (p.role === 'CM') {
+      targetX = controlled.pos.x * 0.5;
+      targetZ = controlled.pos.z + 10; // Supports from behind
+    }
+
+    const moved = moveTowards(p, targetX, targetZ, 2.2);
+    p.model.mesh.lookAt(ballPhysics.pos.x, p.pos.y, ballPhysics.pos.z);
+    p.animSpeed = moved > 0.01 ? 0.7 : 0;
   });
 
-  // 4. Process AI Defenders & Goalkeeper (Red)
+  gameState.tackleCooldown = Math.max(0, gameState.tackleCooldown - delta);
+
+  // 4. AI Red Eagles: the two closest outfielders press, the rest hold a shifting 4-4-2
+  const pressers = players
+    .filter(p => p.team === 'away' && !p.isGK)
+    .sort((a, b) => a.pos.distanceTo(ballPhysics.pos) - b.pos.distanceTo(ballPhysics.pos))
+    .slice(0, 2);
+
   players.forEach(p => {
-    if (p.team === 'away') {
-      if (p.isGK) {
-        // GOALKEEPER AI: Tracks the ball laterally across the 6-yard box
-        const targetGKX = Math.max(-GOAL_WIDTH / 2.3, Math.min(GOAL_WIDTH / 2.3, ballPhysics.pos.x * 0.65));
-        p.pos.x += (targetGKX - p.pos.x) * 4.5 * delta;
-        p.pos.z = -52.2; // Stay on the line
+    if (p.team !== 'away') return;
+    if (p.isGK) {
+      updateKeeper(p, -FIELD_LENGTH / 2 + 2.8, 1);
+      return;
+    }
 
-        // Goalkeeper dive / catch if ball comes near
-        const dGK = p.pos.distanceTo(ballPhysics.pos);
-        if (dGK < 2.5 && ballPhysics.pos.z < -46) {
-          // Block or parry the ball away!
-          ballPhysics.vel.x = (Math.random() - 0.5) * 18;
-          ballPhysics.vel.z = 22; // Kick clear upfield
-          ballPhysics.vel.y = 7;
-          sounds.playKick(190, 0.2);
-          showFeed("KEEPER MAKES A SAVING DIVE!", "text-red-400");
-        }
-        p.model.mesh.rotation.y = 0; // Face forward
-        p.animSpeed = Math.abs(targetGKX - p.pos.x) > 0.1 ? 0.8 : 0;
-      } else {
-        // DEFENDERS AI: Pressure the ball carrier or track back
-        const distDefToBall = p.pos.distanceTo(ballPhysics.pos);
-        
-        if (distDefToBall < 18) {
-          // Press the ball
-          const pressDir = new THREE.Vector3().subVectors(ballPhysics.pos, p.pos).normalize();
-          p.pos.x += pressDir.x * p.speed * delta;
-          p.pos.z += pressDir.z * p.speed * delta;
-          p.model.mesh.rotation.y = Math.atan2(pressDir.x, pressDir.z);
-          p.animSpeed = 0.9;
+    const distDefToBall = p.pos.distanceTo(ballPhysics.pos);
+    if (pressers.includes(p) && distDefToBall < 25) {
+      // Press the ball
+      const pressDir = new THREE.Vector3().subVectors(ballPhysics.pos, p.pos);
+      pressDir.y = 0;
+      pressDir.normalize();
+      p.pos.x += pressDir.x * p.speed * delta;
+      p.pos.z += pressDir.z * p.speed * delta;
+      p.model.mesh.rotation.y = Math.atan2(pressDir.x, pressDir.z);
+      p.animSpeed = 0.9;
 
-          // Tackle if close
-          if (distDefToBall < 1.4 && ballPhysics.carrier !== p) {
-            // Poke the ball away
-            ballPhysics.vel.set((Math.random() - 0.5) * 14, 2, 16);
-            sounds.playKick(120, 0.1);
-            showFeed("TACKLED BY DEFENDER!", "text-red-400");
-          }
-        } else {
-          // Hold defensive shape
-          const homeZ = p.z;
-          p.pos.z += (homeZ - p.pos.z) * 1.5 * delta;
-          p.model.mesh.rotation.y = Math.PI; // Face field
-          p.animSpeed = 0;
-        }
+      // Tackle if close; a short team-wide cooldown gives the dribbler a chance to escape
+      if (distDefToBall < 1.4 && ballPhysics.pos.y < 1.5 && gameState.tackleCooldown === 0) {
+        gameState.tackleCooldown = TACKLE_COOLDOWN;
+        // Poke the ball away
+        ballPhysics.vel.set((Math.random() - 0.5) * 14, 2, 16);
+        sounds.playKick(120, 0.1);
+        showFeed("TACKLED BY DEFENDER!", "text-red-400");
       }
+    } else {
+      // Hold defensive shape, sliding with the ball (never past the halfway line by much)
+      const moved = moveTowards(p, p.x + shiftX, Math.min(p.z + shiftZ * 0.6, 8), 1.6);
+      p.model.mesh.rotation.y = Math.atan2(ballPhysics.pos.x - p.pos.x, ballPhysics.pos.z - p.pos.z);
+      p.animSpeed = moved > 0.01 ? 0.6 : 0;
     }
   });
 
@@ -1245,68 +1432,97 @@ const rCtx = radarCanvas.getContext('2d');
 function updateCamera(delta) {
   const controlled = getControlledPlayer();
 
-  // Dynamic broadcast perspective: Tracks player and ball midpoint
+  // Side-on broadcast camera: sits beyond the +x touchline and pans along the pitch,
+  // so the goals are at the left and right of a landscape screen.
   const focusPoint = new THREE.Vector3()
     .copy(controlled.pos)
     .add(ballPhysics.pos)
     .multiplyScalar(0.5);
 
+  const maxPan = FIELD_LENGTH / 2 - CAMERA_PAN_MARGIN;
+  const focusZ = THREE.MathUtils.clamp(focusPoint.z, -maxPan, maxPan);
+  const focusX = THREE.MathUtils.clamp(focusPoint.x, -FIELD_WIDTH / 2, FIELD_WIDTH / 2);
+
   const targetCamPos = new THREE.Vector3(
-    focusPoint.x * 0.35,
-    Math.max(16, 17 + ballPhysics.pos.y * 0.5),
-    focusPoint.z + 24
+    CAMERA_DISTANCE + focusX * 0.3,
+    CAMERA_HEIGHT + ballPhysics.pos.y * 0.3,
+    focusZ
   );
 
   camera.position.lerp(targetCamPos, 0.08);
-  
-  const camLookAt = new THREE.Vector3(focusPoint.x * 0.5, 2.0, focusPoint.z - 8);
-  camera.lookAt(camLookAt);
+  cameraLookAt.lerp(new THREE.Vector3(focusX * 0.6, 0, focusZ), 0.08);
+  camera.lookAt(cameraLookAt);
 }
 
 function updateRadar() {
   const w = radarCanvas.width = radarCanvas.clientWidth * 2;
   const h = radarCanvas.height = radarCanvas.clientHeight * 2;
+  const pad = 6;
+  // Radar matches the side-on view: world -z is right, world +x is down
+  const toX = (z) => ((FIELD_LENGTH / 2 - z) / FIELD_LENGTH) * (w - pad * 2) + pad;
+  const toY = (x) => ((x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (h - pad * 2) + pad;
+  const sx = (w - pad * 2) / FIELD_LENGTH; // pixels per metre along the pitch
+  const sy = (h - pad * 2) / FIELD_WIDTH;
 
-  // Clear radar
-  rCtx.fillStyle = '#0f2b1d';
+  rCtx.fillStyle = 'rgba(12, 48, 28, 0.85)';
   rCtx.fillRect(0, 0, w, h);
 
-  // Pitch lines on radar
-  rCtx.strokeStyle = 'rgba(255,255,255,0.2)';
-  rCtx.lineWidth = 2;
-  rCtx.strokeRect(4, 4, w - 8, h - 8);
-  // Center line
+  // Pitch markings
+  rCtx.strokeStyle = 'rgba(255,255,255,0.35)';
+  rCtx.lineWidth = 1.5;
+  rCtx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
   rCtx.beginPath();
-  rCtx.moveTo(4, h / 2);
-  rCtx.lineTo(w - 4, h / 2);
+  rCtx.moveTo(w / 2, pad);
+  rCtx.lineTo(w / 2, h - pad);
   rCtx.stroke();
-
-  // Draw Players
-  players.forEach(p => {
-    // Map pitch coords [-FIELD_WIDTH/2, FIELD_WIDTH/2] and [-FIELD_LENGTH/2, FIELD_LENGTH/2] to radar
-    const rx = ((p.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (w - 16) + 8;
-    const ry = ((p.pos.z + FIELD_LENGTH / 2) / FIELD_LENGTH) * (h - 16) + 8;
-
-    rCtx.beginPath();
-    rCtx.arc(rx, ry, p.team === 'home' ? 5 : 4, 0, Math.PI * 2);
-    if (p.team === 'home') {
-      rCtx.fillStyle = (p.id === gameState.controlledPlayerIndex) ? '#00ff66' : '#38bdf8';
-    } else {
-      rCtx.fillStyle = p.isGK ? '#facc15' : '#ef4444';
-    }
-    rCtx.fill();
+  rCtx.beginPath();
+  rCtx.ellipse(w / 2, h / 2, 9.15 * sx, 9.15 * sy, 0, 0, Math.PI * 2);
+  rCtx.stroke();
+  [1, -1].forEach(end => {
+    const lineZ = end * FIELD_LENGTH / 2;
+    const boxDepth = 16.5 * sx;
+    const boxX = end > 0 ? toX(lineZ) : toX(lineZ) - boxDepth;
+    rCtx.strokeRect(boxX, toY(-20.15), boxDepth, 40.3 * sy);
+    // Goal mouth
+    rCtx.fillStyle = 'rgba(255,255,255,0.8)';
+    rCtx.fillRect(toX(lineZ) - (end > 0 ? 3 : 0), toY(-GOAL_WIDTH / 2), 3, GOAL_WIDTH * sy);
   });
 
-  // Draw Ball on Radar
-  const bx = ((ballPhysics.pos.x + FIELD_WIDTH / 2) / FIELD_WIDTH) * (w - 16) + 8;
-  const by = ((ballPhysics.pos.z + FIELD_LENGTH / 2) / FIELD_LENGTH) * (h - 16) + 8;
+  // Players
+  const dot = Math.max(3.5, w / 70);
+  players.forEach(p => {
+    const rx = toX(p.pos.z);
+    const ry = toY(p.pos.x);
+    const isControlled = p.team === 'home' && p.id === gameState.controlledPlayerIndex;
+    rCtx.beginPath();
+    rCtx.arc(rx, ry, isControlled ? dot * 1.35 : dot, 0, Math.PI * 2);
+    if (p.isGK) {
+      rCtx.fillStyle = '#facc15';
+    } else if (p.team === 'home') {
+      rCtx.fillStyle = isControlled ? '#00ff66' : '#38bdf8';
+    } else {
+      rCtx.fillStyle = '#ef4444';
+    }
+    rCtx.fill();
+    if (p.isGK || isControlled) {
+      rCtx.lineWidth = 2;
+      rCtx.strokeStyle = isControlled ? '#ffffff' : (p.team === 'home' ? '#38bdf8' : '#ef4444');
+      rCtx.stroke();
+    }
+  });
+
+  // Ball
   rCtx.beginPath();
-  rCtx.arc(bx, by, 3.5, 0, Math.PI * 2);
+  rCtx.arc(toX(ballPhysics.pos.z), toY(ballPhysics.pos.x), dot * 0.75, 0, Math.PI * 2);
   rCtx.fillStyle = '#ffffff';
   rCtx.fill();
+  rCtx.lineWidth = 1.5;
+  rCtx.strokeStyle = '#000000';
+  rCtx.stroke();
 }
 
 let lastTimestamp = performance.now();
+const portraitTouchQuery = window.matchMedia('(orientation: portrait) and (pointer: coarse)');
 let secondCounter = 0;
 
 function updateMatchClock(delta) {
@@ -1334,7 +1550,8 @@ function gameLoop(now) {
   const delta = Math.min((now - lastTimestamp) / 1000, 0.1);
   lastTimestamp = now;
 
-  if (!gameState.isPaused) {
+  // Phones held in portrait see the rotate overlay, so freeze play until they turn back
+  if (!gameState.isPaused && !portraitTouchQuery.matches) {
     updatePlayers(delta);
     updateBall(delta);
     updateMatchClock(delta);
@@ -1349,6 +1566,7 @@ function gameLoop(now) {
 // Window Resize Handler
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
+  camera.fov = verticalFovFor(camera.aspect);
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -1360,3 +1578,8 @@ window.onload = function() {
   requestAnimationFrame(gameLoop);
   showFeed("MATCH STARTED: PASS, CROSS & SCORE!");
 };
+
+// Test hook: open with ?debug to drive the game from browser automation
+if (new URLSearchParams(window.location.search).has('debug')) {
+  window.__game = { gameState, players, ballPhysics, triggerPass, triggerShoot, updatePlayers, updateBall };
+}

@@ -2,8 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Ram up your Football</title>
+  <meta name="theme-color" content="#0b1510">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon-192.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Inter:wght@400;600;800&display=swap">
@@ -15,36 +22,24 @@
 
 <div id="ui-overlay" class="relative z-20 w-full h-full pointer-events-none flex flex-col justify-between p-3 sm:p-5">
   
-  <!-- Top Scoreboard Bar -->
-  <div class="flex items-center justify-between w-full max-w-4xl mx-auto pointer-events-auto">
-    <!-- Home Team (You) -->
-    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-emerald-500/40 shadow-lg">
-      <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-emerald-500 flex items-center justify-center font-bold text-sm sm:text-base text-neutral-950 border border-white/50">
-        FC
+  <!-- Top bar: compact scoreboard on the left, full-team minimap on the right -->
+  <div class="flex items-start justify-between w-full gap-2 pointer-events-auto">
+    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md pl-1.5 pr-2 sm:pl-2 sm:pr-3 py-1 rounded-xl border border-white/10 shadow-lg">
+      <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center font-bold text-xs text-neutral-950 border border-white/50">FC</div>
+      <div class="text-[11px] sm:text-xs font-bold tracking-wider text-emerald-400 leading-tight">BLUE<br>LIONS</div>
+      <div id="score-home" class="hud-font text-3xl font-bold text-white w-5 text-center">0</div>
+      <div class="flex flex-col items-center px-1.5 sm:px-2 border-x border-white/10">
+        <span class="hud-font text-xl sm:text-2xl font-bold text-amber-400 leading-none" id="match-timer">00:00</span>
+        <span id="match-half" class="text-[8px] sm:text-[9px] text-gray-300 uppercase tracking-widest font-semibold">1ST HALF</span>
       </div>
-      <div class="text-left">
-        <div class="text-xs sm:text-sm font-bold tracking-wider text-emerald-400">BLUE LIONS</div>
-        <div class="text-[10px] text-gray-400 uppercase font-semibold">ATTACK</div>
-      </div>
-      <div id="score-home" class="hud-font text-2xl sm:text-4xl font-bold ml-2 text-white">0</div>
+      <div id="score-away" class="hud-font text-3xl font-bold text-white w-5 text-center">0</div>
+      <div class="text-[11px] sm:text-xs font-bold tracking-wider text-red-400 leading-tight text-right">RED<br>EAGLES</div>
+      <div class="w-7 h-7 rounded-full bg-red-600 flex items-center justify-center font-bold text-xs text-white border border-white/50">RE</div>
     </div>
 
-    <!-- Match Clock & Status -->
-    <div class="flex flex-col items-center bg-black/70 backdrop-blur-md px-4 py-1 sm:py-2 rounded-xl border border-white/10 shadow-lg">
-      <span class="hud-font text-xl sm:text-3xl font-bold text-amber-400" id="match-timer">00:00</span>
-      <span id="match-half" class="text-[9px] sm:text-[10px] text-gray-300 uppercase tracking-widest font-semibold">1ST HALF</span>
-    </div>
-
-    <!-- Away Team (Enemy) -->
-    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-red-500/40 shadow-lg">
-      <div id="score-away" class="hud-font text-2xl sm:text-4xl font-bold mr-2 text-white">0</div>
-      <div class="text-right">
-        <div class="text-xs sm:text-sm font-bold tracking-wider text-red-400">RED EAGLES</div>
-        <div class="text-[10px] text-gray-400 uppercase font-semibold">DEFENSE</div>
-      </div>
-      <div class="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-red-600 flex items-center justify-center font-bold text-sm sm:text-base text-white border border-white/50">
-        RE
-      </div>
+    <!-- Minimap: all 22 players, same orientation as the pitch (Blue Lions attack right) -->
+    <div id="radar-container" class="w-44 h-28 sm:w-52 sm:h-[132px] rounded-lg overflow-hidden border border-emerald-500/40 shadow-2xl">
+      <canvas id="radar-canvas" class="w-full h-full"></canvas>
     </div>
   </div>
 
@@ -52,14 +47,6 @@
   <div class="flex flex-col items-center justify-center space-y-2">
     <div id="action-feed" class="text-xs sm:text-sm tracking-widest font-bold uppercase bg-neutral-900/75 border border-white/20 px-4 py-1 rounded-full opacity-0 transition-opacity duration-300 text-yellow-300">
       PASS READY
-    </div>
-    
-    <!-- Mini Radar -->
-    <div id="radar-container" class="w-32 h-20 sm:w-40 sm:h-24 rounded-lg relative overflow-hidden shadow-2xl border border-emerald-500/30">
-      <canvas id="radar-canvas" class="w-full h-full"></canvas>
-      <div class="absolute inset-0 pointer-events-none border border-white/10 flex items-center justify-center">
-        <div class="w-full h-[1px] bg-white/20"></div>
-      </div>
     </div>
   </div>
 
@@ -76,9 +63,9 @@
     <!-- Desktop Key Bindings Help Tooltip (Hidden on small mobile) -->
     <div class="hidden lg:flex items-center gap-4 bg-black/60 backdrop-blur-md border border-white/15 px-4 py-2.5 rounded-2xl text-[11px] text-gray-300 pointer-events-auto">
       <div><span class="px-2 py-1 bg-white/20 rounded font-mono text-white mr-1">WASD / Arrows</span> Move</div>
-      <div><span class="px-2 py-1 bg-blue-600 text-white rounded font-mono font-bold mr-1">J</span> Pass (Ground)</div>
+      <div><span class="px-2 py-1 bg-blue-600 text-white rounded font-mono font-bold mr-1">J</span> Smart Pass</div>
       <div><span class="px-2 py-1 bg-amber-500 text-white rounded font-mono font-bold mr-1">K</span> High Cross</div>
-      <div><span class="px-2 py-1 bg-red-600 text-white rounded font-mono font-bold mr-1">L</span> Shoot / Volley</div>
+      <div><span class="px-2 py-1 bg-red-600 text-white rounded font-mono font-bold mr-1">L</span> Auto-aim Shot</div>
       <div><span class="px-2 py-1 bg-purple-600 text-white rounded font-mono font-bold mr-1">SPACE</span> Jump / Head</div>
     </div>
 
@@ -114,6 +101,13 @@
     </div>
 
   </div>
+</div>
+
+<!-- Shown on touch devices held in portrait; the game is landscape only -->
+<div id="rotate-overlay" class="fixed inset-0 z-50 bg-neutral-950 flex-col items-center justify-center gap-4 text-center px-8">
+  <i class="fa-solid fa-mobile-screen-button text-5xl text-emerald-400 rotate-hint"></i>
+  <div class="hud-font text-3xl tracking-wider">ROTATE YOUR PHONE</div>
+  <p class="text-sm text-gray-400">Ram up your Football plays in landscape.</p>
 </div>
 
 <div id="goal-modal" class="fixed inset-0 z-40 bg-black/75 backdrop-blur-md flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
