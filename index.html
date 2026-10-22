@@ -17,89 +17,109 @@
 </head>
 <body class="text-white">
 
-
 <canvas id="game-canvas"></canvas>
 
-<div id="ui-overlay" class="relative z-20 w-full h-full pointer-events-none flex flex-col justify-between p-3 sm:p-5">
-  
-  <!-- Top bar: compact scoreboard on the left, full-team minimap on the right -->
-  <div class="flex items-start justify-between w-full gap-2 pointer-events-auto">
-    <div class="flex items-center gap-2 sm:gap-3 bg-neutral-900/80 backdrop-blur-md pl-1.5 pr-2 sm:pl-2 sm:pr-3 py-1 rounded-xl border border-white/10 shadow-lg">
-      <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center font-bold text-xs text-neutral-950 border border-white/50">FC</div>
-      <div class="text-[11px] sm:text-xs font-bold tracking-wider text-emerald-400 leading-tight">BLUE<br>LIONS</div>
-      <div id="score-home" class="hud-font text-3xl font-bold text-white w-5 text-center">0</div>
-      <div class="flex flex-col items-center px-1.5 sm:px-2 border-x border-white/10">
-        <span class="hud-font text-xl sm:text-2xl font-bold text-amber-400 leading-none" id="match-timer">00:00</span>
-        <span id="match-half" class="text-[8px] sm:text-[9px] text-gray-300 uppercase tracking-widest font-semibold">1ST HALF</span>
+<div id="ui-overlay" class="pointer-events-none">
+  <!-- Top left: pause and scoreboard -->
+  <div class="absolute top-[var(--pad-t)] left-[var(--pad-l)] flex items-stretch gap-1.5 pointer-events-auto">
+    <button id="btn-pause" aria-label="Pause" class="w-9 h-9 rounded-lg bg-neutral-900/85 border border-white/15 flex items-center justify-center active:scale-95">
+      <i class="fa-solid fa-pause text-sm"></i>
+    </button>
+    <div class="scoreboard flex items-stretch rounded-lg overflow-hidden border border-white/15 shadow-lg text-sm">
+      <div class="flex items-center gap-1.5 bg-blue-700 pl-2 pr-1.5"><span class="font-extrabold tracking-wide">BLU</span></div>
+      <div class="flex items-center bg-neutral-950/90 px-2 gap-1.5 hud-font text-2xl leading-none pt-0.5">
+        <span id="score-home">0</span><span class="text-white/40">-</span><span id="score-away">0</span>
       </div>
-      <div id="score-away" class="hud-font text-3xl font-bold text-white w-5 text-center">0</div>
-      <div class="text-[11px] sm:text-xs font-bold tracking-wider text-red-400 leading-tight text-right">RED<br>EAGLES</div>
-      <div class="w-7 h-7 rounded-full bg-red-600 flex items-center justify-center font-bold text-xs text-white border border-white/50">RE</div>
-    </div>
-
-    <!-- Minimap: all 22 players, same orientation as the pitch (Blue Lions attack right) -->
-    <div id="radar-container" class="w-44 h-28 sm:w-52 sm:h-[132px] rounded-lg overflow-hidden border border-emerald-500/40 shadow-2xl">
-      <canvas id="radar-canvas" class="w-full h-full"></canvas>
+      <div class="flex items-center gap-1.5 bg-red-600 pl-1.5 pr-2"><span class="font-extrabold tracking-wide">RED</span></div>
+      <div class="flex flex-col justify-center bg-neutral-900/85 px-2 leading-none">
+        <span id="match-timer" class="hud-font text-xl text-amber-300 pt-0.5">00:00</span>
+        <span id="match-half" class="text-[8px] font-bold text-white/60 tracking-widest">1ST HALF</span>
+      </div>
     </div>
   </div>
 
-  <!-- Notification Banner / Combo Feed -->
-  <div class="flex flex-col items-center justify-center space-y-2">
-    <div id="action-feed" class="text-xs sm:text-sm tracking-widest font-bold uppercase bg-neutral-900/75 border border-white/20 px-4 py-1 rounded-full opacity-0 transition-opacity duration-300 text-yellow-300">
-      PASS READY
-    </div>
+  <!-- Top right: minimap of all 22 players (Blue Lions attack to the right) -->
+  <div id="radar-container" class="absolute top-[var(--pad-t)] right-[var(--pad-r)] w-40 h-[100px] sm:w-52 sm:h-[132px] rounded-lg overflow-hidden shadow-2xl">
+    <canvas id="radar-canvas" class="w-full h-full"></canvas>
   </div>
 
-  <!-- Bottom Interactive Zone & Controls UI -->
-  <div class="w-full flex items-end justify-between pointer-events-none pb-2 sm:pb-3">
-    
-    <!-- Mobile Virtual Joystick placeholder area (active on touch) -->
-    <div class="w-36 h-36 relative pointer-events-auto">
-      <div id="joystick-zone" class="joystick-base">
-        <div id="joystick-thumb" class="joystick-thumb"></div>
-      </div>
+  <!-- Event toast -->
+  <div class="absolute top-14 left-1/2 -translate-x-1/2">
+    <div id="toast" class="toast hud-font text-2xl tracking-widest px-5 pt-1 rounded-md bg-neutral-950/80 border border-white/20 opacity-0">SAVE!</div>
+  </div>
+
+  <!-- Goal banner -->
+  <div id="goal-banner" class="absolute inset-x-0 top-1/3 -translate-y-1/2 flex flex-col items-center opacity-0">
+    <div class="goal-strip w-full py-2 flex justify-center">
+      <span class="hud-font text-7xl sm:text-8xl font-bold tracking-[0.2em] text-white drop-shadow-[0_4px_0_rgba(0,0,0,0.5)]">GOAL!</span>
     </div>
+    <div id="goal-detail" class="mt-2 text-sm font-bold tracking-wider bg-neutral-950/80 px-4 py-1 rounded-full">9 STRIKER 23'</div>
+  </div>
 
-    <!-- Desktop Key Bindings Help Tooltip (Hidden on small mobile) -->
-    <div class="hidden lg:flex items-center gap-4 bg-black/60 backdrop-blur-md border border-white/15 px-4 py-2.5 rounded-2xl text-[11px] text-gray-300 pointer-events-auto">
-      <div><span class="px-2 py-1 bg-white/20 rounded font-mono text-white mr-1">WASD / Arrows</span> Move</div>
-      <div><span class="px-2 py-1 bg-blue-600 text-white rounded font-mono font-bold mr-1">J</span> Smart Pass</div>
-      <div><span class="px-2 py-1 bg-amber-500 text-white rounded font-mono font-bold mr-1">K</span> High Cross</div>
-      <div><span class="px-2 py-1 bg-red-600 text-white rounded font-mono font-bold mr-1">L</span> Auto-aim Shot</div>
-      <div><span class="px-2 py-1 bg-purple-600 text-white rounded font-mono font-bold mr-1">SPACE</span> Jump / Head</div>
+  <!-- Bottom left: joystick -->
+  <div id="joystick-zone" class="joystick-base pointer-events-auto">
+    <div id="joystick-thumb" class="joystick-thumb"></div>
+  </div>
+
+  <!-- Bottom centre: possession tag and controlled player -->
+  <div class="absolute bottom-[var(--pad-b)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
+    <div id="player-name" class="text-[11px] font-bold tracking-wider bg-neutral-950/70 px-3 py-0.5 rounded-full">9 · STRIKER</div>
+    <div id="phase-tag" class="phase-tag attacking text-[11px] font-extrabold tracking-[0.25em] px-4 py-1 rounded-md">ATTACKING</div>
+  </div>
+
+  <!-- Desktop key hints -->
+  <div id="key-hints" class="hidden lg:flex absolute bottom-[var(--pad-b)] left-48 gap-3 text-[11px] text-gray-300 bg-black/55 border border-white/10 rounded-xl px-3 py-2">
+    <span><b class="kbd">WASD</b> Move</span>
+    <span><b class="kbd">J</b> <span id="hint-a">Pass</span></span>
+    <span><b class="kbd">L</b> <span id="hint-b">Shoot</span></span>
+    <span><b class="kbd">K</b> <span id="hint-c">Through</span></span>
+  </div>
+
+  <!-- Bottom right: DLS-style contextual buttons -->
+  <div class="action-cluster pointer-events-auto">
+    <button id="btn-c" class="action-btn btn-c"><span class="lbl">THROUGH</span></button>
+    <button id="btn-a" class="action-btn btn-a"><span class="lbl">PASS</span></button>
+    <button id="btn-b" class="action-btn btn-b"><span class="lbl">SHOOT</span></button>
+  </div>
+</div>
+
+<!-- Pre-match -->
+<div id="start-screen" class="overlay z-40">
+  <div class="panel text-center">
+    <div class="text-xs tracking-[0.3em] text-emerald-300 font-bold">FRIENDLY MATCH</div>
+    <div class="flex items-center justify-center gap-5 my-4">
+      <div class="flex flex-col items-center gap-1"><div class="crest bg-blue-700">BL</div><span class="text-xs font-bold">BLUE LIONS</span></div>
+      <span class="hud-font text-4xl text-white/50">VS</span>
+      <div class="flex flex-col items-center gap-1"><div class="crest bg-red-600">RE</div><span class="text-xs font-bold">RED EAGLES</span></div>
     </div>
+    <button id="btn-kickoff" class="menu-btn primary">KICK OFF</button>
+    <p class="text-[11px] text-white/50 mt-3">Joystick to move. Pass, Shoot and Through change to Tackle, Pressure and Switch when you defend.</p>
+  </div>
+</div>
 
-    <!-- Action Buttons (Touch Friendly & Clickable) -->
-    <div class="grid grid-cols-2 gap-2.5 sm:gap-3 pointer-events-auto">
-      <!-- Ground Pass Button -->
-      <button id="btn-pass" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-cyan-500 border border-blue-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
-        <i class="fa-solid fa-arrows-turn-to-dots text-base sm:text-lg mb-0.5"></i>
-        <span>PASS</span>
-        <span class="text-[9px] opacity-75 hidden sm:inline">(J)</span>
-      </button>
-
-      <!-- High Cross Button -->
-      <button id="btn-cross" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-amber-600 to-yellow-400 border border-amber-300/40 text-neutral-950 font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
-        <i class="fa-solid fa-arrow-up-right-dots text-base sm:text-lg mb-0.5"></i>
-        <span>CROSS</span>
-        <span class="text-[9px] opacity-75 hidden sm:inline">(K)</span>
-      </button>
-
-      <!-- Jump Header Button -->
-      <button id="btn-header" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-purple-700 to-indigo-500 border border-purple-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
-        <i class="fa-solid fa-child-reaching text-base sm:text-lg mb-0.5"></i>
-        <span>HEAD</span>
-        <span class="text-[9px] opacity-75 hidden sm:inline">(SPC)</span>
-      </button>
-
-      <!-- Power Shoot Button -->
-      <button id="btn-shoot" class="action-btn flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-tr from-red-600 to-rose-400 border border-red-300/40 text-white font-bold text-xs sm:text-sm active:scale-95 shadow-lg">
-        <i class="fa-solid fa-bolt text-base sm:text-lg mb-0.5"></i>
-        <span>SHOOT</span>
-        <span class="text-[9px] opacity-75 hidden sm:inline">(L)</span>
-      </button>
+<!-- Pause -->
+<div id="pause-menu" class="overlay z-40 hidden-overlay">
+  <div class="panel text-center">
+    <div class="hud-font text-4xl tracking-widest mb-3">PAUSED</div>
+    <div class="flex flex-col gap-2">
+      <button id="btn-resume" class="menu-btn primary">RESUME</button>
+      <button id="btn-sound" class="menu-btn"><i class="fa-solid fa-volume-high mr-2"></i><span>SOUND ON</span></button>
+      <button id="btn-restart" class="menu-btn">RESTART MATCH</button>
     </div>
+  </div>
+</div>
 
+<!-- Half time / full time -->
+<div id="break-screen" class="overlay z-40 hidden-overlay">
+  <div class="panel w-[min(92vw,420px)]">
+    <div id="break-title" class="text-center text-xs tracking-[0.3em] text-emerald-300 font-bold">HALF TIME</div>
+    <div class="flex items-center justify-center gap-4 my-2">
+      <span class="font-extrabold">BLU</span>
+      <span id="break-score" class="hud-font text-5xl leading-none pt-1">0 - 0</span>
+      <span class="font-extrabold">RED</span>
+    </div>
+    <table id="break-stats" class="w-full text-sm my-2"></table>
+    <button id="btn-break" class="menu-btn primary w-full mt-2">SECOND HALF</button>
   </div>
 </div>
 
@@ -108,26 +128,6 @@
   <i class="fa-solid fa-mobile-screen-button text-5xl text-emerald-400 rotate-hint"></i>
   <div class="hud-font text-3xl tracking-wider">ROTATE YOUR PHONE</div>
   <p class="text-sm text-gray-400">Ram up your Football plays in landscape.</p>
-</div>
-
-<div id="goal-modal" class="fixed inset-0 z-40 bg-black/75 backdrop-blur-md flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
-  <div class="text-center p-6 sm:p-10 bg-gradient-to-b from-neutral-900 to-neutral-950 rounded-3xl border-2 border-amber-400 max-w-sm sm:max-w-md w-11/12 shadow-2xl relative">
-    <div class="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 rounded-full bg-amber-400 flex items-center justify-center text-4xl shadow-lg border-4 border-neutral-900">
-      ⚽
-    </div>
-    <h1 class="hud-font text-5xl sm:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 mt-4 tracking-wider">
-      GOOOAL!
-    </h1>
-    <p id="goal-detail" class="text-sm sm:text-base text-gray-200 mt-2 font-medium">Sensational Strike!</p>
-    <div class="mt-6 flex flex-col gap-2">
-      <button id="btn-resume-match" class="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-bold rounded-xl transition text-base tracking-wider uppercase shadow-lg">
-        Continue Attack
-      </button>
-      <button id="btn-restart-match" class="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-semibold rounded-xl text-sm transition">
-        Reset Match
-      </button>
-    </div>
-  </div>
 </div>
 
 <script type="module" src="/src/main.ts"></script>

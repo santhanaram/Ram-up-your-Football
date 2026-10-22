@@ -1,5 +1,6 @@
 import './styles.css';
-import './legacy/game.js';
+import { startGame } from './game/game';
 import { enableLandscapeLock } from './orientation';
 
+startGame();
 enableLandscapeLock();
